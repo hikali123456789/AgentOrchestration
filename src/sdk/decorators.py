@@ -25,6 +25,7 @@ def task(name: Optional[str] = None, retries: int = 0, timeout: int = 300):
             except asyncio.TimeoutError:
                 raise TimeoutError(f"Task {name or func.__name__} timed out after {timeout}s")
 
+        wrapper.__task_config__ = func.__task_config__
         return wrapper
     return decorator
 
@@ -50,6 +51,7 @@ def on_event(event_type: str):
         async def wrapper(*args, **kwargs):
             return await func(*args, **kwargs)
 
+        wrapper.__event_handler__ = func.__event_handler__
         return wrapper
     return decorator
 
