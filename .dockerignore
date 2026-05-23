@@ -1,0 +1,69 @@
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Python virtual environments
+.venv/
+venv/
+.venv/*
+venv/*
+env/
+
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
+.tox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+.eggs/
+
+# Git
+.git/
+.gitattributes
+
+# IDE
+.idea/
+.vscode/
+.vs/
+*.sublime-project
+*.sublime-workspace
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml

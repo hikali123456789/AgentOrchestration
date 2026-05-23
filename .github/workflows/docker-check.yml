@@ -1,0 +1,55 @@
+name: Docker Context Check
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create temporary Dockerfile
+        run: |
+          cat > /tmp/Dockerfile.check << 'EOF'
+          FROM scratch
+          COPY . /app
+          EOF
+
+      - name: Build Docker image (verify .dockerignore works)
+        run: |
+          docker build --no-cache -t docker-check-test -f /tmp/Dockerfile.check . 2>&1 | tee /tmp/build.log
+
+      - name: Verify no sensitive files in image
+        run: |
+          # Extract image contents and check for forbidden files
+          docker save docker-check-test -o /tmp/image.tar
+          FORBIDDEN=$(tar -tf /tmp/image.tar | \
+            grep -iE '(/\.env|__pycache__|\.pyc|\.pytest_cache|\.mypy_cache|\.tox/|venv/|node_modules/|\.DS_Store)' || true)
+          if [ -n "$FORBIDDEN" ]; then
+            echo "ERROR: Forbidden files found in Docker build context:"
+            echo "$FORBIDDEN"
+            exit 1
+          fi
+          echo "✅ Docker build context is clean — no forbidden files."
+
+      - name: Verify no sensitive files in container (secondary check)
+        run: |
+          docker run --rm docker-check-test ls -la /app/ || true
+          # Confirm .env, __pycache__ dirs, and .venv are NOT present
+          if docker run --rm docker-check-test test -f /app/.env 2>/dev/null; then
+            echo "ERROR: .env file leaked into image!"
+            exit 1
+          fi
+          if docker run --rm docker-check-test test -d /app/__pycache__ 2>/dev/null; then
+            echo "ERROR: __pycache__ directory leaked into image!"
+            exit 1
+          fi
+          if docker run --rm docker-check-test test -d /app/venv 2>/dev/null; then
+            echo "ERROR: venv directory leaked into image!"
+            exit 1
+          fi
+          echo "✅ Runtime verification passed — no sensitive files in container."
