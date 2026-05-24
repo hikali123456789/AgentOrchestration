@@ -143,6 +143,138 @@ class TestRegistryConfigValidation:
         # Verify logs explain the decision without exposing private runtime data
         assert "stale_field" in error_msg or "policy_violation" in error_msg
 
+
+class TestConfigBoolGetter:
+    """Tests for issue #3757 - Add typed getter for boolean flags."""
+
+    def test_get_bool_actual_boolean(self):
+        """Test get_bool with actual boolean values."""
+        config = Config()
+        config.set("feature.enabled", True)
+        config.set("feature.disabled", False)
+        
+        assert config.get_bool("feature.enabled") is True
+        assert config.get_bool("feature.disabled") is False
+
+    def test_get_bool_string_false_not_truthy(self):
+        """Test that string 'false' is not treated as truthy.
+        
+        This is the main bug fix - previously 'false' string would be truthy.
+        """
+        config = Config()
+        config.set("feature.flag", "false")
+        
+        # String "false" should be parsed as boolean False
+        assert config.get_bool("feature.flag") is False
+
+    def test_get_bool_string_true(self):
+        """Test that string 'true' is parsed correctly."""
+        config = Config()
+        config.set("feature.flag", "true")
+        
+        assert config.get_bool("feature.flag") is True
+
+    def test_get_bool_case_insensitive(self):
+        """Test that boolean parsing is case-insensitive."""
+        config = Config()
+        config.set("feature.a", "TRUE")
+        config.set("feature.b", "False")
+        config.set("feature.c", "YES")
+        config.set("feature.d", "No")
+        
+        assert config.get_bool("feature.a") is True
+        assert config.get_bool("feature.b") is False
+        assert config.get_bool("feature.c") is True
+        assert config.get_bool("feature.d") is False
+
+    def test_get_bool_numeric_values(self):
+        """Test get_bool with numeric values."""
+        config = Config()
+        config.set("feature.zero", 0)
+        config.set("feature.one", 1)
+        config.set("feature.large", 100)
+        
+        assert config.get_bool("feature.zero") is False
+        assert config.get_bool("feature.one") is True
+        assert config.get_bool("feature.large") is True
+
+    def test_get_bool_default_value(self):
+        """Test get_bool with default value."""
+        config = Config()
+        
+        # Key doesn't exist, should return default
+        assert config.get_bool("nonexistent.key", False) is False
+        assert config.get_bool("nonexistent.key", True) is True
+
+    def test_get_bool_all_truthy_strings(self):
+        """Test all supported truthy string values."""
+        config = Config()
+        truthy_values = ["true", "yes", "1", "on", "enabled"]
+        
+        for i, val in enumerate(truthy_values):
+            config.set(f"feature.{i}", val)
+            assert config.get_bool(f"feature.{i}") is True, f"Failed for value: {val}"
+
+    def test_get_bool_all_falsy_strings(self):
+        """Test all supported falsy string values."""
+        config = Config()
+        falsy_values = ["false", "no", "0", "off", "disabled"]
+        
+        for i, val in enumerate(falsy_values):
+            config.set(f"feature.{i}", val)
+            assert config.get_bool(f"feature.{i}") is False, f"Failed for value: {val}"
+
+    def test_get_bool_unrecognized_string_returns_default(self, caplog):
+        """Test that unrecognized string values return default and log warning."""
+        import logging
+        config = Config()
+        config.set("feature.flag", "maybe")
+        
+        with caplog.at_level(logging.WARNING):
+            result = config.get_bool("feature.flag", default=False)
+        
+        assert result is False
+        assert "Cannot parse boolean value" in caplog.text
+        assert "maybe" in caplog.text
+
+    def test_get_bool_nested_keys(self):
+        """Test get_bool with nested dot-notation keys."""
+        config = Config()
+        config.set("a.b.c.enabled", "true")
+        config.set("x.y.z.disabled", "false")
+        
+        assert config.get_bool("a.b.c.enabled") is True
+        assert config.get_bool("x.y.z.disabled") is False
+
+    def test_get_bool_none_value(self):
+        """Test get_bool with None value."""
+        config = Config()
+        config.set("feature.null_value", None)
+        
+        assert config.get_bool("feature.null_value", False) is False
+        assert config.get_bool("feature.null_value", True) is True
+
+    def test_consumer_api_prevents_misconfiguration(self):
+        """Regression test for consumer API bug.
+        
+        Verifies that runtime code reading feature flags through get_bool
+        correctly handles string values like 'false' that were previously
+        easy to treat as truthy.
+        """
+        config = Config()
+        # Simulate config loaded from JSON where booleans might be strings
+        import json
+        json_config = '{"features": {"enable_new_ui": "false", "enable_beta": "true"}}'
+        config._data = json.loads(json_config)
+        
+        # Using get_bool prevents misconfiguration
+        assert config.get_bool("features.enable_new_ui") is False
+        assert config.get_bool("features.enable_beta") is True
+        
+        # Using regular get would cause bugs
+        assert config.get("features.enable_new_ui") == "false"  # String, not bool
+        assert bool(config.get("features.enable_new_ui")) is True  # Bug! String "false" is truthy
+
 # 2019-02-01T18:58:35 update
 
 # 2019-07-31T13:45:15 update

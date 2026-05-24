@@ -86,6 +86,10 @@ class Config:
             current = current[part]
         current[parts[-1]] = value
 
+    # Define truthy and falsy values for boolean parsing
+    _TRUE_VALUES = {"true", "yes", "1", "on", "enabled"}
+    _FALSE_VALUES = {"false", "no", "0", "off", "disabled"}
+
     def get(self, key: str, default: Any = None) -> Any:
         parts = key.split(".")
         current = self._data
@@ -97,6 +101,54 @@ class Config:
             else:
                 return default
         return current
+
+    def get_bool(self, key: str, default: bool = False) -> bool:
+        """Get a configuration value as a boolean.
+
+        This method provides type-safe boolean parsing for feature flags
+        and configuration options. It handles string values like "false"
+        that would otherwise be treated as truthy in Python.
+
+        Args:
+            key: The configuration key (dot notation supported)
+            default: Default value if key is not found or cannot be parsed
+
+        Returns:
+            bool: The boolean value of the configuration option
+
+        Examples:
+            >>> config.get_bool("feature.enabled", False)
+            False
+            >>> config.get_bool("feature.enabled", "false")  # Returns False, not True
+            False
+        """
+        value = self.get(key, default)
+
+        # Already a boolean
+        if isinstance(value, bool):
+            return value
+
+        # Handle numeric values
+        if isinstance(value, (int, float)):
+            return bool(value)
+
+        # Handle string values (case-insensitive)
+        if isinstance(value, str):
+            value_lower = value.lower().strip()
+            if value_lower in self._TRUE_VALUES:
+                return True
+            if value_lower in self._FALSE_VALUES:
+                return False
+            # For unrecognized strings, log warning and return default
+            logger.warning(
+                f"Cannot parse boolean value '{value}' for key '{key}'. "
+                f"Expected one of: {self._TRUE_VALUES | self._FALSE_VALUES}. "
+                f"Using default: {default}"
+            )
+            return default
+
+        # For any other type, convert to bool
+        return bool(value) if value is not None else default
 
     def set(self, key: str, value: Any) -> None:
         self._set_nested(key, value)
