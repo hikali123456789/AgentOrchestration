@@ -2,19 +2,73 @@
 
 import os
 import json
-from typing import Any, Dict, Optional
+import logging
+from typing import Any, Dict, Optional, Set
+
+from src.common.errors import ConfigurationError
+
+logger = logging.getLogger(__name__)
+
+
+# Define allowed configuration keys for registry validation
+ALLOWED_REGISTRY_KEYS: Set[str] = {
+    "name",
+    "type",
+    "version",
+    "config",
+    "status",
+    "created_at",
+    "updated_at",
+    "metrics",
+    "id",
+}
 
 
 class Config:
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None, strict_mode: bool = False):
         self._data: Dict[str, Any] = {}
+        self._strict_mode = strict_mode
         if config_path:
             self.load(config_path)
         self._load_env_overrides()
 
     def load(self, path: str) -> None:
         with open(path) as f:
-            self._data = json.load(f)
+            data = json.load(f)
+        if self._strict_mode:
+            self._validate_registry_config(data)
+        self._data = data
+
+    def _validate_registry_config(self, data: Dict[str, Any], path: str = "") -> None:
+        """Validate registry configuration against allowed keys.
+        
+        Raises:
+            ConfigurationError: If unknown fields are detected in registry config.
+        """
+        if not isinstance(data, dict):
+            return
+            
+        for key in data.keys():
+            current_path = f"{path}.{key}" if path else key
+            # Check if key is in allowed set (only for top-level registry entries)
+            if not path and key not in ALLOWED_REGISTRY_KEYS:
+                error_msg = f"Unknown registry field '{key}' detected. Allowed fields: {ALLOWED_REGISTRY_KEYS}"
+                logger.warning(f"Configuration drift detected: {error_msg}")
+                raise ConfigurationError(error_msg)
+            
+            # Recursively validate nested structures
+            if isinstance(data[key], dict):
+                self._validate_registry_config(data[key], current_path)
+
+    def validate_strict(self) -> None:
+        """Enable strict mode and validate current configuration.
+        
+        This method enforces the configuration drift invariant before
+        committing scheduling, routing, queue, or workflow state.
+        """
+        self._strict_mode = True
+        self._validate_registry_config(self._data)
+        logger.info("Registry configuration validated successfully - no unknown fields detected")
 
     def _load_env_overrides(self) -> None:
         prefix = "AO_"

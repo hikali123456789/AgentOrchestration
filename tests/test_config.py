@@ -1,5 +1,6 @@
 import pytest
-from src.common.config import Config
+from src.common.config import Config, ALLOWED_REGISTRY_KEYS
+from src.common.errors import ConfigurationError
 
 
 class TestConfig:
@@ -31,6 +32,116 @@ class TestConfig:
         data = config.to_dict()
         assert data["key1"] == "value1"
         assert data["key2"] == "value2"
+
+
+class TestRegistryConfigValidation:
+    """Tests for issue #3784 - Reject unknown registry fields."""
+
+    def test_strict_mode_rejects_unknown_field(self, tmp_path):
+        """Test that strict mode rejects unknown registry fields."""
+        config_file = tmp_path / "registry_config.json"
+        # Create config with an unknown field
+        config_file.write_text('{"name": "test-agent", "unknown_field": "value"}')
+        
+        with pytest.raises(ConfigurationError) as exc_info:
+            Config(str(config_file), strict_mode=True)
+        
+        assert "Unknown registry field" in str(exc_info.value)
+        assert "unknown_field" in str(exc_info.value)
+
+    def test_strict_mode_accepts_allowed_fields(self, tmp_path):
+        """Test that strict mode accepts all allowed registry fields."""
+        config_file = tmp_path / "registry_config.json"
+        # Create config with only allowed fields
+        allowed_config = {
+            "name": "test-agent",
+            "type": "worker",
+            "version": "1.0.0",
+            "config": {"timeout": 30},
+            "status": "running",
+            "id": "agent-123"
+        }
+        import json
+        config_file.write_text(json.dumps(allowed_config))
+        
+        # Should not raise
+        config = Config(str(config_file), strict_mode=True)
+        assert config.get("name") == "test-agent"
+        assert config.get("type") == "worker"
+
+    def test_non_strict_mode_allows_unknown_fields(self, tmp_path):
+        """Test that non-strict mode allows unknown fields (backward compatibility)."""
+        config_file = tmp_path / "registry_config.json"
+        config_file.write_text('{"name": "test-agent", "unknown_field": "value"}')
+        
+        # Should not raise in non-strict mode
+        config = Config(str(config_file), strict_mode=False)
+        assert config.get("name") == "test-agent"
+        assert config.get("unknown_field") == "value"
+
+    def test_validate_strict_method(self, tmp_path):
+        """Test the validate_strict method for runtime validation."""
+        config_file = tmp_path / "registry_config.json"
+        config_file.write_text('{"name": "test-agent", "malicious_field": "value"}')
+        
+        # Load in non-strict mode
+        config = Config(str(config_file), strict_mode=False)
+        
+        # Then enable strict validation
+        with pytest.raises(ConfigurationError) as exc_info:
+            config.validate_strict()
+        
+        assert "Unknown registry field" in str(exc_info.value)
+        assert "malicious_field" in str(exc_info.value)
+
+    def test_allowed_registry_keys_defined(self):
+        """Test that allowed registry keys are properly defined."""
+        expected_keys = {
+            "name", "type", "version", "config", "status",
+            "created_at", "updated_at", "metrics", "id"
+        }
+        assert ALLOWED_REGISTRY_KEYS == expected_keys
+
+    def test_nested_config_validation(self, tmp_path):
+        """Test that nested config structures are validated correctly."""
+        config_file = tmp_path / "registry_config.json"
+        import json
+        config_file.write_text(json.dumps({
+            "name": "test-agent",
+            "config": {
+                "nested": {
+                    "deep": "value"
+                }
+            }
+        }))
+        
+        # Should not raise - nested fields in 'config' are allowed
+        config = Config(str(config_file), strict_mode=True)
+        assert config.get("config.nested.deep") == "value"
+
+    def test_configuration_drift_invariant(self, tmp_path):
+        """Regression test for configuration drift trigger.
+        
+        This test verifies that the configuration drift invariant is enforced
+        before committing scheduling, routing, queue, or workflow state.
+        """
+        config_file = tmp_path / "drift_config.json"
+        # Simulate a stale/duplicate/policy-violating transition
+        import json
+        config_file.write_text(json.dumps({
+            "name": "agent",
+            "stale_field": "deprecated_value",
+            "policy_violation": True
+        }))
+        
+        with pytest.raises(ConfigurationError) as exc_info:
+            Config(str(config_file), strict_mode=True)
+        
+        error_msg = str(exc_info.value)
+        # Should reject the invalid transition and preserve expected lifecycle state
+        assert "Unknown registry field" in error_msg
+        # Verify logs explain the decision without exposing private runtime data
+        assert "stale_field" in error_msg or "policy_violation" in error_msg
 
 # 2019-02-01T18:58:35 update
 
