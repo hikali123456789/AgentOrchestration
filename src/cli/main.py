@@ -7,7 +7,55 @@ from src.common.config import Config
 from src.common.logging import configure_logging
 
 
-def cli():
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+
+
+def non_negative_int(value: str) -> int:
+    """Argparse type for non-negative integers."""
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: '{value}'")
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"value must be non-negative, got: {ivalue}")
+    return ivalue
+
+
+def handle_init(args) -> int:
+    """Handle the init command. Returns exit code."""
+    print(f"Initializing project: {args.name}")
+    return EXIT_SUCCESS
+
+
+def handle_deploy(args) -> int:
+    """Handle the deploy command. Returns exit code."""
+    print(f"Deploying agent from manifest: {args.manifest}")
+    return EXIT_SUCCESS
+
+
+def handle_status(args) -> int:
+    """Handle the status command. Returns exit code."""
+    print("Checking agent status...")
+    return EXIT_SUCCESS
+
+
+def handle_logs(args) -> int:
+    """Handle the logs command. Returns exit code."""
+    print(f"Fetching logs for agent: {args.agent_id}")
+    return EXIT_SUCCESS
+
+
+COMMAND_HANDLERS = {
+    "init": handle_init,
+    "deploy": handle_deploy,
+    "status": handle_status,
+    "logs": handle_logs,
+}
+
+
+def cli() -> int:
+    """Run the CLI. Returns exit code."""
     parser = argparse.ArgumentParser(description="Agent Orchestrator CLI")
     parser.add_argument("--config", "-c", help="Path to config file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
@@ -25,7 +73,7 @@ def cli():
 
     logs_parser = subparsers.add_parser("logs", help="View agent logs")
     logs_parser.add_argument("agent_id", help="Agent ID")
-    logs_parser.add_argument("--tail", "-t", type=int, default=50, help="Number of lines")
+    logs_parser.add_argument("--tail", "-t", type=non_negative_int, default=50, help="Number of lines (must be non-negative)")
 
     args = parser.parse_args()
 
@@ -34,144 +82,13 @@ def cli():
     else:
         configure_logging("INFO")
 
-    if args.command == "init":
-        print(f"Initializing project: {args.name}")
-    elif args.command == "deploy":
-        print(f"Deploying agent from manifest: {args.manifest}")
-    elif args.command == "status":
-        print("Checking agent status...")
-    elif args.command == "logs":
-        print(f"Fetching logs for agent: {args.agent_id}")
-    else:
+    handler = COMMAND_HANDLERS.get(args.command)
+    if handler is None:
         parser.print_help()
-        sys.exit(1)
+        return EXIT_FAILURE
+
+    return handler(args)
 
 
 if __name__ == "__main__":
-    cli()
-
-# 2019-01-03T18:44:00 update
-
-# 2019-01-15T19:36:16 update
-
-# 2019-02-15T12:13:23 update
-
-# 2019-03-18T20:23:13 update
-
-# 2019-03-22T09:42:46 update
-
-# 2019-03-25T09:42:45 update
-
-# 2019-07-16T18:56:48 update
-
-# 2019-07-25T19:52:16 update
-
-# 2019-08-18T18:35:47 update
-
-# 2019-10-08T08:27:44 update
-
-# 2019-11-05T14:16:14 update
-
-# 2019-12-06T15:08:55 update
-
-# 2020-01-15T12:28:12 update
-
-# 2020-02-18T12:59:12 update
-
-# 2020-03-18T18:36:09 update
-
-# 2020-03-31T11:11:42 update
-
-# 2020-06-16T08:24:25 update
-
-# 2020-07-08T18:35:39 update
-
-# 2020-12-09T10:37:56 update
-
-# 2020-12-18T09:38:50 update
-
-# 2020-12-29T13:08:30 update
-
-# 2021-01-01T10:07:30 update
-
-# 2021-01-19T16:42:27 update
-
-# 2021-03-04T16:47:19 update
-
-# 2021-06-25T09:17:23 update
-
-# 2021-06-30T09:57:21 update
-
-# 2021-10-14T19:11:31 update
-
-# 2021-10-28T12:40:28 update
-
-# 2021-11-29T14:09:58 update
-
-# 2021-12-09T08:29:48 update
-
-# 2021-12-14T12:25:33 update
-
-# 2021-12-17T08:11:09 update
-
-# 2022-01-05T12:27:12 update
-
-# 2022-01-05T17:17:05 update
-
-# 2022-02-25T13:48:23 update
-
-# 2022-04-15T08:25:05 update
-
-# 2022-07-13T19:24:38 update
-
-# 2022-09-02T17:41:54 update
-
-# 2022-12-17T16:02:25 update
-
-# 2023-03-09T09:50:27 update
-
-# 2023-04-10T10:37:23 update
-
-# 2023-06-01T10:30:02 update
-
-# 2023-06-27T09:30:48 update
-
-# 2023-08-04T08:53:47 update
-
-# 2023-09-29T20:24:53 update
-
-# 2023-10-25T18:53:52 update
-
-# 2023-12-04T15:52:41 update
-
-# 2024-01-03T09:27:19 update
-
-# 2024-03-07T17:47:20 update
-
-# 2024-04-08T19:24:37 update
-
-# 2024-06-10T10:00:24 update
-
-# 2024-08-07T19:47:04 update
-
-# 2024-09-17T14:57:37 update
-
-# 2024-10-02T09:59:06 update
-
-# 2024-12-10T17:02:51 update
-
-# 2025-01-17T08:55:36 update
-
-# 2025-02-27T18:17:16 update
-
-# 2025-05-07T13:33:58 update
-
-# 2025-05-31T17:12:56 update
-
-# 2025-06-03T15:53:08 update
-
-# 2026-01-28T11:15:32 update
-
-# 2026-03-21T19:53:15 update
-
-# 2026-05-06T09:09:51 update
+    sys.exit(cli())
