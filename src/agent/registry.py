@@ -1,10 +1,13 @@
 """Agent Registry — Manages agent lifecycle and metadata."""
 
 import json
+import logging
 import time
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class AgentStatus(Enum):
@@ -17,6 +20,9 @@ class AgentStatus(Enum):
 
 
 class AgentRegistry:
+    # Cache for capability discovery API
+    _capability_cache: Dict[str, List[str]] = {}
+    
     def __init__(self, storage_backend: str = "memory"):
         self.storage_backend = storage_backend
         self._agents: Dict[str, Dict[str, Any]] = {}
@@ -34,19 +40,44 @@ class AgentRegistry:
             "created_at": timestamp,
             "updated_at": timestamp,
             "version": "1.0.0",
+            "enabled": True,  # New field for enable/disable control
             "metrics": {"tasks_completed": 0, "errors": 0, "uptime": 0},
         }
         group = agent_type.split(".")[0]
         if group not in self._index:
             self._index[group] = []
         self._index[group].append(agent_id)
+        # Invalidate cache when agent is registered
+        self._invalidate_cache(group)
         return agent_id
 
     def get(self, agent_id: str) -> Optional[Dict[str, Any]]:
         return self._agents.get(agent_id)
 
-    def list(self, status: Optional[AgentStatus] = None, group: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list(self, status: Optional[AgentStatus] = None, group: Optional[str] = None, 
+             include_disabled: bool = False) -> List[Dict[str, Any]]:
+        """List agents with optional filtering.
+        
+        Args:
+            status: Filter by agent status
+            group: Filter by agent type group
+            include_disabled: If False (default), exclude disabled agents from results.
+                            This enforces the capability discovery API invariant.
+        
+        Returns:
+            List of agent dictionaries matching the filters.
+        
+        Note:
+            By default, disabled agents are excluded from listings to prevent
+            tasks from resolving to unavailable, unauthorized, or incompatible handlers.
+        """
         agents = self._agents.values()
+        
+        # Enforce capability discovery API invariant: exclude disabled entries
+        if not include_disabled:
+            agents = [a for a in agents if a.get("enabled", True)]
+            logger.debug(f"Filtered out disabled agents, {len(list(agents))} enabled agents remain")
+        
         if status:
             agents = [a for a in agents if a["status"] == status.value]
         if group:
@@ -61,6 +92,48 @@ class AgentRegistry:
         self._agents[agent_id]["updated_at"] = time.time()
         return True
 
+    def set_enabled(self, agent_id: str, enabled: bool) -> bool:
+        """Enable or disable an agent.
+        
+        When an agent is disabled, it will be excluded from capability discovery
+        API listings by default, preventing tasks from resolving to unavailable handlers.
+        
+        Args:
+            agent_id: The agent ID to enable/disable
+            enabled: True to enable, False to disable
+            
+        Returns:
+            True if successful, False if agent not found
+        """
+        if agent_id not in self._agents:
+            return False
+        
+        old_enabled = self._agents[agent_id].get("enabled", True)
+        self._agents[agent_id]["enabled"] = enabled
+        self._agents[agent_id]["updated_at"] = time.time()
+        
+        # Invalidate cache when agent enabled state changes
+        group = self._agents[agent_id]["type"].split(".")[0]
+        self._invalidate_cache(group)
+        
+        logger.info(f"Agent {agent_id} {'enabled' if enabled else 'disabled'} (was {old_enabled})")
+        return True
+
+    def is_enabled(self, agent_id: str) -> bool:
+        """Check if an agent is enabled."""
+        agent = self._agents.get(agent_id)
+        return agent.get("enabled", True) if agent else False
+
+    def _invalidate_cache(self, group: str) -> None:
+        """Invalidate cached registry lookups for a group.
+        
+        This ensures that capability discovery API returns fresh data
+        after agent enable/disable state changes.
+        """
+        if group in self._capability_cache:
+            del self._capability_cache[group]
+            logger.debug(f"Invalidated cache for group: {group}")
+
     def delete(self, agent_id: str) -> bool:
         if agent_id not in self._agents:
             return False
@@ -68,10 +141,16 @@ class AgentRegistry:
         group = agent["type"].split(".")[0]
         if group in self._index and agent_id in self._index[group]:
             self._index[group].remove(agent_id)
+        # Invalidate cache when agent is deleted
+        self._invalidate_cache(group)
         return True
 
     def count(self) -> int:
         return len(self._agents)
+    
+    def count_enabled(self) -> int:
+        """Count only enabled agents."""
+        return sum(1 for a in self._agents.values() if a.get("enabled", True))
 
 # 2019-01-29T11:24:49 update
 

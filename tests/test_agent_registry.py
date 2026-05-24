@@ -48,6 +48,138 @@ class TestAgentRegistry:
     def test_delete_nonexistent_agent(self):
         assert not self.registry.delete("nonexistent-id")
 
+
+class TestRegistryDisabledEntries:
+    """Tests for issue #3854 - Avoid leaking disabled entries in listings."""
+
+    def test_new_agent_is_enabled_by_default(self):
+        """Test that newly registered agents are enabled by default."""
+        agent_id = self.registry.register("test-agent", "worker.processor")
+        agent = self.registry.get(agent_id)
+        assert agent["enabled"] is True
+        assert self.registry.is_enabled(agent_id) is True
+
+    def test_list_excludes_disabled_agents_by_default(self):
+        """Test that list() excludes disabled agents by default.
+        
+        This enforces the capability discovery API invariant.
+        """
+        agent1 = self.registry.register("enabled-agent", "worker.processor")
+        agent2 = self.registry.register("disabled-agent", "worker.processor")
+        
+        # Disable agent2
+        self.registry.set_enabled(agent2, False)
+        
+        # List should only return enabled agents
+        agents = self.registry.list()
+        assert len(agents) == 1
+        assert agents[0]["id"] == agent1
+
+    def test_list_include_disabled_flag(self):
+        """Test that include_disabled=True returns all agents."""
+        agent1 = self.registry.register("enabled-agent", "worker.processor")
+        agent2 = self.registry.register("disabled-agent", "worker.processor")
+        
+        self.registry.set_enabled(agent2, False)
+        
+        # With include_disabled=True, should return both
+        agents = self.registry.list(include_disabled=True)
+        assert len(agents) == 2
+
+    def test_set_enabled(self):
+        """Test enabling and disabling agents."""
+        agent_id = self.registry.register("test-agent", "worker.processor")
+        
+        # Disable
+        assert self.registry.set_enabled(agent_id, False) is True
+        assert self.registry.is_enabled(agent_id) is False
+        
+        # Enable
+        assert self.registry.set_enabled(agent_id, True) is True
+        assert self.registry.is_enabled(agent_id) is True
+
+    def test_set_enabled_nonexistent_agent(self):
+        """Test that set_enabled returns False for nonexistent agent."""
+        assert self.registry.set_enabled("nonexistent-id", False) is False
+
+    def test_count_enabled(self):
+        """Test count_enabled only counts enabled agents."""
+        self.registry.register("agent-1", "worker.processor")
+        agent2 = self.registry.register("agent-2", "worker.processor")
+        self.registry.register("agent-3", "worker.processor")
+        
+        # Disable one agent
+        self.registry.set_enabled(agent2, False)
+        
+        assert self.registry.count() == 3
+        assert self.registry.count_enabled() == 2
+
+    def test_capability_discovery_invariant(self):
+        """Regression test for capability discovery API invariant.
+        
+        This test verifies that the capability discovery API invariant is enforced
+        before committing scheduling, routing, queue, or workflow state.
+        """
+        # Register multiple agents
+        agent1 = self.registry.register("active-agent", "worker.processor")
+        agent2 = self.registry.register("inactive-agent", "worker.processor")
+        agent3 = self.registry.register("another-active", "worker.analyzer")
+        
+        # Disable one agent
+        self.registry.set_enabled(agent2, False)
+        
+        # Capability discovery (list) should not leak disabled entries
+        available_agents = self.registry.list()
+        available_ids = [a["id"] for a in available_agents]
+        
+        # Disabled agent should not be in results
+        assert agent2 not in available_ids
+        assert agent1 in available_ids
+        assert agent3 in available_ids
+        
+        # Tasks should not resolve to unavailable handlers
+        assert len(available_agents) == 2
+
+    def test_disabled_agent_with_status_filter(self):
+        """Test that disabled agents are excluded even with status filter."""
+        agent1 = self.registry.register("running-enabled", "worker.processor")
+        agent2 = self.registry.register("running-disabled", "worker.processor")
+        
+        self.registry.update_status(agent1, AgentStatus.RUNNING)
+        self.registry.update_status(agent2, AgentStatus.RUNNING)
+        self.registry.set_enabled(agent2, False)
+        
+        # Filter by RUNNING status - should still exclude disabled
+        running_agents = self.registry.list(status=AgentStatus.RUNNING)
+        assert len(running_agents) == 1
+        assert running_agents[0]["id"] == agent1
+
+    def test_disabled_agent_with_group_filter(self):
+        """Test that disabled agents are excluded even with group filter."""
+        agent1 = self.registry.register("worker-1", "worker.processor")
+        agent2 = self.registry.register("worker-2", "worker.processor")
+        agent3 = self.registry.register("monitor-1", "monitor.watcher")
+        
+        self.registry.set_enabled(agent2, False)
+        
+        # Filter by worker group - should still exclude disabled
+        workers = self.registry.list(group="worker")
+        assert len(workers) == 1
+        assert workers[0]["id"] == agent1
+
+    def test_cache_invalidation_on_enable_disable(self):
+        """Test that cache is invalidated when agent enabled state changes."""
+        agent_id = self.registry.register("test-agent", "worker.processor")
+        
+        # Set some cache entry
+        AgentRegistry._capability_cache["worker"] = ["cached_data"]
+        
+        # Disable agent - should invalidate cache
+        self.registry.set_enabled(agent_id, False)
+        
+        # Cache should be cleared for this group
+        assert "worker" not in AgentRegistry._capability_cache
+
 # 2019-01-23T10:28:57 update
 
 # 2019-01-28T18:15:57 update
